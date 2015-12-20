@@ -1,0 +1,569 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+# Copyright © 2015  Daniel Dehennin <daniel.dehennin@baby-gnu.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+"""OpenNebula Sunstone REST API Client
+
+"""
+
+import gevent
+import gevent.socket
+import gevent.subprocess
+from gevent.socket import AF_UNIX
+from gevent.socket import SOCK_STREAM
+
+# Make standard library gevent friendly
+from gevent import monkey
+monkey.patch_all()
+
+import sys
+
+import requests
+from bs4 import BeautifulSoup
+
+from websocket import create_connection
+from urlparse import urlparse
+
+from os import access
+from os import R_OK
+from os import unlink
+from os import environ
+
+from os.path import join
+
+from argparse import ArgumentParser
+from argparse import RawDescriptionHelpFormatter
+
+import re
+
+import logging
+
+VM_STATE = {u'0': 'INIT',
+            u'1': u'PENDING',
+            u'2': u'HOLD',
+            u'3': u'ACTIVE',
+            u'4': u'STOPPED',
+            u'5': u'SUSPENDED',
+            u'6': u'DONE',
+            u'7': u'SHOULD NOT EXIST',
+            u'8': u'POWEROFF',
+            u'9': u'UNDEPLOYED'}
+
+VM_LCM_STATE = {u'0': u'LCM_INIT',
+                u'1': u'PROLOG',
+                u'2': u'BOOT',
+                u'3': u'RUNNING',
+                u'4': u'MIGRATE',
+                u'5': u'SAVE_STOP',
+                u'6': u'SAVE_SUSPEND',
+                u'7': u'SAVE_MIGRATE',
+                u'8': u'PROLOG_MIGRATE',
+                u'9': u'PROLOG_RESUME',
+                u'10': u'EPILOG_STOP',
+                u'11': u'EPILOG',
+                u'12': u'SHUTDOWN',
+                u'15': u'CLEANUP_RESUBMIT',
+                u'16': u'UNKNOWN',
+                u'17': u'HOTPLUG',
+                u'18': u'SHUTDOWN_POWEROFF',
+                u'19': u'BOOT_UNKNOWN',
+                u'20': u'BOOT_POWEROFF',
+                u'21': u'BOOT_SUSPENDED',
+                u'22': u'BOOT_STOPPED',
+                u'23': u'CLEANUP_DELETE',
+                u'24': u'HOTPLUG_SNAPSHOT',
+                u'25': u'HOTPLUG_NIC',
+                u'26': u'HOTPLUG_SAVEAS',
+                u'27': u'HOTPLUG_SAVEAS_POWEROFF',
+                u'28': u'HOTPLUG_SAVEAS_SUSPENDED',
+                u'29': u'SHUTDOWN_UNDEPLOY',
+                u'30': u'EPILOG_UNDEPLOY',
+                u'31': u'PROLOG_UNDEPLOY',
+                u'32': u'BOOT_UNDEPLOY',
+                u'33': u'HOTPLUG_PROLOG_POWEROFF',
+                u'34': u'HOTPLUG_EPILOG_POWEROFF',
+                u'35': u'BOOT_MIGRATE',
+                u'36': u'BOOT_FAILURE',
+                u'37': u'BOOT_MIGRATE_FAILURE',
+                u'38': u'PROLOG_MIGRATE_FAILURE',
+                u'39': u'PROLOG_FAILURE',
+                u'40': u'EPILOG_FAILURE',
+                u'41': u'EPILOG_STOP_FAILURE',
+                u'42': u'EPILOG_UNDEPLOY_FAILURE',
+                u'43': u'PROLOG_MIGRATE_POWEROFF',
+                u'44': u'PROLOG_MIGRATE_POWEROFF_FAILURE',
+                u'45': u'PROLOG_MIGRATE_SUSPEND',
+                u'46': u'PROLOG_MIGRATE_SUSPEND_FAILURE',
+                u'47': u'BOOT_UNDEPLOY_FAILURE',
+                u'48': u'BOOT_STOPPED_FAILURE',
+                u'49': u'PROLOG_RESUME_FAILURE',
+                u'50': u'PROLOG_UNDEPLOY_FAILURE',
+                u'51': u'DISK_SNAPSHOT_POWEROFF',
+                u'52': u'DISK_SNAPSHOT_REVERT_POWEROFF',
+                u'53': u'DISK_SNAPSHOT_DELETE_POWEROFF',
+                u'54': u'DISK_SNAPSHOT_SUSPENDED',
+                u'55': u'DISK_SNAPSHOT_REVERT_SUSPENDED',
+                u'56': u'DISK_SNAPSHOT_DELETE_SUSPENDED',
+                u'57': u'DISK_SNAPSHOT',
+                u'58': u'DISK_SNAPSHOT_REVERT',
+                u'59': u'DISK_SNA'}
+
+def main():
+    opts = parse_cmdline()
+
+    try:
+        main_logger = init_logging('OpenNebula Sunstone REST API Client', opts)
+        osc_logger = init_logging('ONESunstoneClient', opts)
+
+        get_one_credentials(opts)
+        get_one_sunstone_url(opts)
+
+        osc = ONESunstoneClient(opts)
+
+        osc.loop()
+
+    except Exception, err:
+        main_logger.error("{msg}".format(msg=err),
+                          exc_info=main_logger.isEnabledFor(logging.DEBUG))
+        sys.exit(1)
+
+
+def parse_cmdline():
+    desc = """Run commands on VMs throught Sunstone REST API.
+
+The authentication is performed with ~/.one/one_auth file as describe in the documentation[1].
+
+The Sunstone URL is retrieve in the following order:
+
+1. from command line parameter --url
+2. from environment variable ONE_SUNSTONE
+
+[1] http://docs.opennebula.org/stable/administration/users_and_groups/manage_users.html#shell-environment
+"""
+
+    parser = ArgumentParser(description='OpenNebula Sunstone REST API Client',
+                            epilog=desc,
+                            formatter_class=RawDescriptionHelpFormatter)
+
+    parser.add_argument('--vm', metavar='VMID',
+                        help='ID of a VM')
+
+    parser.add_argument('--startvnc', action='store_true',
+                        help='Start VNC client ssvncviewer')
+
+    parser.add_argument('--url', help='URL to OpenNebula Sunstone frontend')
+
+    parser.add_argument('--auth', help='ONE_AUTH file')
+
+    group = parser.add_argument_group('logging')
+
+    group.add_argument('-l', '--log-level',
+                       choices=[u'debug', u'info', u'warning', u'error', u'critical'],
+                       default='error', help=u'Log level')
+
+    group.add_argument('-v', '--verbose',
+                       action='store_true',
+                       help=u'Verbose mode, equivalent to -l info')
+
+    group.add_argument('-d', '--debug',
+                       action='store_true',
+                       help=u'Debug mode, equivalent to -l debug')
+
+    opts = parser.parse_args()
+
+    if opts.verbose:
+        opts.log_level = 'info'
+    if opts.debug:
+        opts.log_level = 'debug'
+                    
+    opts.log_level = getattr(logging, opts.log_level.upper())
+
+    return opts
+
+
+def init_logging(name, opts):
+    """Initialize logging
+
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(opts.log_level)
+    log_handler = logging.StreamHandler()
+    log_handler.setLevel(opts.log_level)
+    if logger.isEnabledFor(logging.DEBUG):
+        log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    else:
+        log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    log_handler.setFormatter(log_formatter)
+    logger.addHandler(log_handler)
+    return logger
+
+
+def get_one_credentials(opts):
+    """Get user and password credential
+
+    """
+    user = None
+    password = None
+    one_auth = join(environ['HOME'], '.one', 'one_auth')
+
+    if opts.auth is not None and access(opts.auth, R_OK):
+        one_auth = opts.auth
+    elif 'ONE_AUTH' in environ:
+        one_auth = environ['ONE_AUTH']
+
+    with open(one_auth, 'r') as one_auth_fh:
+        user, password = one_auth_fh.readline().strip().split(':')
+
+    opts.creds = (user, password)
+
+
+def get_one_sunstone_url(opts):
+    """Get the URL to OpenNebula Sunstone frontend
+
+    """
+    url = None
+    if opts.url is not None:
+        url = opts.url
+    elif 'ONE_SUNSTONE' in environ:
+        url = environ['ONE_SUNSTONE']
+    else:
+        raise SystemError('No Sunstone URL provided')
+
+    opts.url = url
+
+
+class ONESunstoneClient(object):
+    """OpenNebula Sunstone Client object
+
+    """
+
+    def __init__(self, opts):
+        """Initialize the Sunstone client
+
+        """
+        self.opts = opts
+        self.logger = logging.getLogger('ONESunstoneClient')
+        self.logger.setLevel(opts.log_level)
+
+        self.client = requests.session()
+        self.client_opts = {'headers': {'Referer': self.opts.url},
+                            'csrftoken': None}
+
+        self.logged = False
+        self.threads = []
+        self.websocket = None
+        self.connection = None
+        self.socket = None
+        self.socket_path = None
+
+
+    def loop(self):
+        """OpenNebula Sunstone client loop
+
+        """
+        self.logger.debug("Start main loop")
+        self.login()
+        vm = self.ask_vm()
+
+        action = self.ask_action(vm)
+        if action:
+            getattr(self, action)(vm)
+
+        # Clean command line arguments
+        self.opts.vm = None
+        self.opts.startvnc = False
+            
+        return True
+
+
+    def ask_vm(self):
+        """Display OpenNebula Sunstone client menu
+
+        """
+        self.logger.debug('Ask VM to user')
+        if self.opts.vm is not None:
+            try:
+                vm = self.get_vm(self.opts.vm)
+                return vm
+            except SystemError, err:
+                print err
+
+        vms = self.get_vm()
+        vm_info = {}
+
+        print u'List of current VMs:'
+        for vm in vms:
+            vmid = vm['TEMPLATE']['VMID']
+            vm_info[vmid] = vm
+            state = VM_STATE[vm['STATE']]
+            lcm_state = VM_LCM_STATE[vm['LCM_STATE']]
+            if state != u'ACTIVE':
+                vm_msg = u'{id} - {name} ({state})'
+            else:
+                vm_msg = u'{id} - {name} ({state}/{lcm_state})'
+
+            print vm_msg.format(id=vmid,
+                                name=vm['NAME'],
+                                state=state,
+                                lcm_state=lcm_state)
+
+        print u'Select a virtual machine id or q|quit to exit'
+        choice = raw_input(u'[q]: ')
+
+        vm_ids = vm_info.keys()
+        if choice == '':
+            choice = u'q'
+        elif choice in vm_ids:
+            return vm_info[choice]
+        elif re.match(r'^q(uit)?', choice):
+            print u'Voluntary stay of proceedings'
+            sys.exit(0)
+        else:
+            print u'Invalid response: {choice}'.format(choice=choice)
+            return False
+
+
+    def ask_action(self, vm):
+        """Ask action to user
+
+        """
+        self.logger.debug('Ask VM action to user')
+        actions = ['startvnc']
+
+        if self.opts.startvnc:
+            return actions[0]
+
+        if vm['STATE'] != u'3' or vm['LCM_STATE'] != u'3':
+            actions.remove('startvnc')
+
+        if len(actions) == 0:
+            vmid = vm['TEMPLATE']['VMID']
+            state = VM_STATE[vm['STATE']]
+            lcm_state = VM_LCM_STATE[vm['LCM_STATE']]
+            if state != u'ACTIVE':
+                vm_msg = u'{id} - {name} ({state})'
+            else:
+                vm_msg = u'{id} - {name} ({state}/{lcm_state})'
+
+            msg = 'No action available for ' + vm_msg
+            raise SystemError(msg.format(id=vmid,
+                                         name=vm['NAME'],
+                                         state=state,
+                                         lcm_state=lcm_state))
+
+        print 'List of available actions:'
+        for aid, action in enumerate(actions):
+            print '{id} - {name}'.format(id=aid, name=action)
+
+        msg = u'Select an action to perform on {id} - {name}, or q|quit to exit'
+        print msg.format(id=vm['TEMPLATE']['VMID'],
+                         name=vm['NAME'])
+
+        choice = raw_input(u'[startvnc]: ')
+
+        if choice == '':
+            choice = u'startvnc'
+
+        try:
+            choice = int(choice)
+            return actions[choice]
+        except ValueError:
+            if re.match(r'^q(uit)?', choice):
+                print u'Voluntary stay of proceedings'
+                sys.exit(0)
+            elif choice in actions:
+                return choice
+            else:
+                msg = u'Invalid response: {choice}'
+                raise ValueError(msg.format(choice=choice))
+        
+
+    def login(self):
+        """Log in OpenNebula Sunstone
+
+        """
+        msg = u'Login as {user} to {url}'.format(user=self.opts.creds[0],
+                                                 url=self.opts.url)
+        self.logger.info(msg)
+
+        login_url = self.opts.url + '/login'
+        login = self.client.post(login_url,
+                                 auth=self.opts.creds,
+                                 headers=self.client_opts['headers'])
+
+        if not login.ok:
+            msg = "Unable to login as {user}: {reason}"
+            raise SystemError(msg.format(user=self.opts.creds[0], reason=login.reason))
+        else:
+            self.logger.debug('Loging ok')
+
+        root_url = self.opts.url + '/'
+        root = self.client.get(root_url,
+                               headers=self.client_opts['headers'])
+
+        soup = BeautifulSoup(root.content, 'html.parser')
+        javascript = soup.find_all('script')[1]
+        jscsrftoken = javascript.text.split(';')[0]
+        csrftoken = jscsrftoken.split('=')[1].strip().strip("'")
+        self.client_opts['csrftoken'] = {'csrftoken': csrftoken}
+        self.logged = True
+
+
+    def get_vm(self, vmid=None):
+        """Get a VM or list of VMs
+
+        """
+        if vmid is not None:
+            msg = 'Get informations of vm {id}'
+        else:
+            msg = 'Get informations of all user VMs'
+
+        self.logger.info(msg.format(id=vmid))
+
+        if not self.logged:
+            self.login()
+
+        vm_url = self.opts.url + '/vm'
+        params = {}
+        params.update(self.client_opts['csrftoken'])
+
+        if vmid is not None:
+            vm_url += '/{vmid}'.format(vmid=vmid)
+        else:
+            params['timeout'] = False
+            
+        reply = self.client.get(vm_url, params=params)
+        if not reply.ok:
+            if vmid is not None:
+                msg = 'Unable to get virtual machine {vmid}: {reason}'
+            else:
+                msg = 'Unable to get virtual machines: {reason}'
+            raise SystemError(msg.format(vmid=vmid, reason=reply.reason))
+
+        if vmid is None:
+            return reply.json()['VM_POOL']['VM']
+        else:
+            return reply.json()['VM']
+
+
+    def startvnc(self, vm):
+        """Start a VNC client for a VM
+
+        """
+        vmid = vm['TEMPLATE']['VMID']
+
+        self.logger.info('Start VNC client for {id}'.format(id=vmid))
+
+        startvnc_url = self.opts.url + '/vm/' + vmid + '/startvnc'
+        reply = self.client.post(startvnc_url,
+                                 params=self.client_opts['csrftoken'])
+
+        vnc = reply.json()
+
+        vnc_host = urlparse(startvnc_url).netloc
+        ws_url = "ws://{host}:29876/?token={token}".format(host=vnc_host,
+                                                           token=vnc['token'])
+
+        socket_name = 'one-sunstone-client-' + vnc['token'] + '.socket'
+        self.socket_path = join('/tmp', socket_name)
+
+        if access(self.socket_path, R_OK):
+            unlink(self.socket_path)
+
+        try:
+            self.socket = gevent.socket.socket(AF_UNIX, SOCK_STREAM)
+            self.socket.bind(self.socket_path)
+            self.socket.listen(1)
+        except gevent.socket.error, err:
+            print 'Failed to create socket. Error code: ' + str(err[0]) + ' , Error message : ' + err[1]
+            sys.exit(1)
+
+        self.websocket = create_connection(ws_url,
+                                           header=['Origin: {url}'.format(url=self.opts.url),
+                                                   'Sec-WebSocket-Protocol: binary'])
+
+        self.threads = [gevent.spawn(self._from_ws),
+                        gevent.spawn(self._from_socket),
+                        gevent.spawn(self._start_viewer)]
+
+        gevent.joinall(self.threads)
+
+
+    def terminate(self):
+        """Terminate everything
+
+        """
+        self.logger.debug('Terminate gevent threads')
+
+        if self.websocket.connected:
+            self.websocket.close()
+
+        if not self.socket.closed:
+            self.socket.close()
+
+        if access(self.socket_path, R_OK):
+            unlink(self.socket_path)
+
+        for thread in self.threads:
+            gevent.kill(thread)
+
+
+    def _start_viewer(self):
+        try:
+            cmd = ['ssvncviewer', self.socket_path]
+
+            msg = 'Start VNC viewer: {cmd}'
+            self.logger.debug(msg.format(cmd=' '.join(cmd)))
+
+            gevent.subprocess.call(cmd)
+        except Exception, err:
+            print "Fail to run ssvncviewer: {err}".format(err=err)
+
+        self.terminate()
+
+
+    def _from_ws(self):
+        self.logger.debug('Start passing data from WebSocket to VNC client')
+        while self.websocket.connected and not self.socket.closed:
+            if self.connection is None:
+                gevent.sleep(2)
+                continue
+
+            data = self.websocket.recv()
+            try:
+                self.connection.sendall(data)
+            except gevent.socket.error, err:
+                print "Unable to write to local socket: {err}".format(err=err)
+                self.terminate()
+
+
+    def _from_socket(self):
+        self.logger.debug('Start passing data from VNC client to WebSocket')
+        conn, _ = self.socket.accept()
+        self.connection = conn
+        while not self.connection.closed and self.websocket.connected:
+
+            data = self.connection.recv(4096)
+            try:
+                self.websocket.send(data)
+            except gevent.socket.error, err:
+                print "Unable to write to WebSocket: {err}".format(err=err)
+                self.terminate()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
