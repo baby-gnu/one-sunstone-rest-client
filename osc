@@ -303,6 +303,9 @@ class ONESunstoneClient(object):
                 print err
 
         vms = self.get_vm()
+        if not vms:
+            raise SystemError('No virtual machine are running, nothing to do')
+
         vm_info = {}
 
         print u'List of current VMs:'
