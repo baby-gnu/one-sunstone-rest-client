@@ -120,7 +120,13 @@ VM_LCM_STATE = {u'0': u'LCM_INIT',
                 u'56': u'DISK_SNAPSHOT_DELETE_SUSPENDED',
                 u'57': u'DISK_SNAPSHOT',
                 u'58': u'DISK_SNAPSHOT_REVERT',
-                u'59': u'DISK_SNA'}
+                u'59': u'DISK_SNAPSHOT_DELETE'}
+
+POOL_FILTER = {
+    u'INFO_GROUP'         : -1,
+    u'INFO_ALL'           : -2,
+    u'INFO_MINE'          : -3,
+    u'INFO_PRIMARY_GROUP' : -4}
 
 def main():
     opts = parse_cmdline()
@@ -250,6 +256,8 @@ class ONESunstoneClient(object):
     """OpenNebula Sunstone Client object
 
     """
+
+    csrftoken_regex = re.compile(r'''csrftoken\s*=\s*['"]([^'"]+)['"]''')
 
     def __init__(self, opts):
         """Initialize the Sunstone client
@@ -393,7 +401,21 @@ class ONESunstoneClient(object):
             else:
                 msg = u'Invalid response: {choice}'
                 raise ValueError(msg.format(choice=choice))
-        
+
+    def _find_csrftoken(self, text):
+        """Find the csrftoken in the text
+
+        """
+        csrftoken = None
+
+        for line in text.splitlines():
+            m = self.csrftoken_regex.search(line)
+            if m is not None:
+                csrftoken = m.group(1)
+                break
+
+        return csrftoken
+
 
     def login(self):
         """Log in OpenNebula Sunstone
@@ -418,10 +440,17 @@ class ONESunstoneClient(object):
         root = self.client.get(root_url,
                                headers=self.client_opts['headers'])
 
+        if not root.ok:
+            raise SystemError("Unable to get root page after login")
+
         soup = BeautifulSoup(root.content, 'html.parser')
-        javascript = soup.find_all('script')[1]
-        jscsrftoken = javascript.text.split(';')[0]
-        csrftoken = jscsrftoken.split('=')[1].strip().strip("'")
+
+        csrftoken = None
+        for script in soup.find_all('script'):
+            csrftoken = self._find_csrftoken(script.getText())
+            if csrftoken is not None:
+                break
+
         self.client_opts['csrftoken'] = {'csrftoken': csrftoken}
         self.logged = True
 
@@ -448,6 +477,7 @@ class ONESunstoneClient(object):
             vm_url += '/{vmid}'.format(vmid=vmid)
         else:
             params['timeout'] = False
+            params['pool_filter'] = POOL_FILTER[u'INFO_ALL']
             
         reply = self.client.get(vm_url, params=params)
         if not reply.ok:
