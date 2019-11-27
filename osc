@@ -312,7 +312,7 @@ class ONESunstoneClient(object):
                 vm = self.get_vm(self.opts.vm)
                 return vm
             except SystemError as err:
-                print err
+                print(err)
 
         vms = self.get_vm()
         if not vms:
@@ -320,7 +320,7 @@ class ONESunstoneClient(object):
 
         vm_info = {}
 
-        print u'List of current VMs:'
+        print(u'List of current VMs:')
         for vm in vms:
             vmid = vm['ID']
             vm_info[vmid] = vm
@@ -331,12 +331,12 @@ class ONESunstoneClient(object):
             else:
                 vm_msg = u'{id} - {name} ({state}/{lcm_state})'
 
-            print vm_msg.format(id=vmid,
+            print(vm_msg.format(id=vmid,
                                 name=vm['NAME'],
                                 state=state,
-                                lcm_state=lcm_state)
+                                lcm_state=lcm_state))
 
-        print u'Select a virtual machine id or q|quit to exit'
+        print(u'Select a virtual machine id or q|quit to exit')
         choice = raw_input(u'[q]: ')
 
         vm_ids = vm_info.keys()
@@ -345,10 +345,10 @@ class ONESunstoneClient(object):
         elif choice in vm_ids:
             return vm_info[choice]
         elif re.match(r'^q(uit)?', choice):
-            print u'Voluntary stay of proceedings'
+            print(u'Voluntary stay of proceedings')
             sys.exit(0)
         else:
-            print u'Invalid response: {choice}'.format(choice=choice)
+            print(u'Invalid response: {choice}'.format(choice=choice))
             return False
 
 
@@ -380,13 +380,13 @@ class ONESunstoneClient(object):
                                          state=state,
                                          lcm_state=lcm_state))
 
-        print 'List of available actions:'
+        print('List of available actions:')
         for aid, action in enumerate(actions):
-            print '{id} - {name}'.format(id=aid, name=action)
+            print('{id} - {name}'.format(id=aid, name=action))
 
         msg = u'Select an action to perform on {id} - {name}, or q|quit to exit'
-        print msg.format(id=vm['ID'],
-                         name=vm['NAME'])
+        print(msg.format(id=vm['ID'],
+                         name=vm['NAME']))
 
         choice = raw_input(u'[startvnc]: ')
 
@@ -398,7 +398,7 @@ class ONESunstoneClient(object):
             return actions[choice]
         except ValueError:
             if re.match(r'^q(uit)?', choice):
-                print u'Voluntary stay of proceedings'
+                print(u'Voluntary stay of proceedings')
                 sys.exit(0)
             elif choice in actions:
                 return choice
@@ -528,7 +528,7 @@ class ONESunstoneClient(object):
             self.socket.bind(self.socket_path)
             self.socket.listen(1)
         except gevent.socket.error as err:
-            print 'Failed to create socket. Error code: ' + str(err[0]) + ' , Error message : ' + err[1]
+            print('Failed to create socket. Error code: ' + str(err[0]) + ' , Error message : ' + err[1])
             sys.exit(1)
 
         self.logger.debug('Create a websocket connection to {ws_url}'.format(ws_url=ws_url))
@@ -571,7 +571,7 @@ class ONESunstoneClient(object):
 
             gevent.subprocess.call(cmd)
         except Exception as err:
-            print "Fail to run ssvncviewer: {err}".format(err=err)
+            print("Fail to run ssvncviewer: {err}".format(err=err))
 
         self.terminate()
 
@@ -587,7 +587,7 @@ class ONESunstoneClient(object):
             try:
                 self.connection.sendall(data)
             except gevent.socket.error as err:
-                print "Unable to write to local socket: {err}".format(err=err)
+                print("Unable to write to local socket: {err}".format(err=err))
                 self.terminate()
 
 
@@ -601,7 +601,7 @@ class ONESunstoneClient(object):
             try:
                 self.websocket.send(data)
             except gevent.socket.error as err:
-                print "Unable to write to WebSocket: {err}".format(err=err)
+                print("Unable to write to WebSocket: {err}".format(err=err))
                 self.terminate()
 
 
