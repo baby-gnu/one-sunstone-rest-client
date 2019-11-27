@@ -17,6 +17,11 @@ It requires the following dependencies:
 * [websocket](https://github.com/liris/websocket-client)
 * [Requests](http://python-requests.org)
 
+## Compatibility
+
+We now only support python3 since we use f-strings and remove
+`urlparse` dependency.
+
 # Usage
 
 Just run the `osc` script, it will show you the list of your virtual
