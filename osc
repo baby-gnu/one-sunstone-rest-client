@@ -318,7 +318,7 @@ class ONESunstoneClient(object):
 
         print u'List of current VMs:'
         for vm in vms:
-            vmid = vm['TEMPLATE']['VMID']
+            vmid = vm['ID']
             vm_info[vmid] = vm
             state = VM_STATE[vm['STATE']]
             lcm_state = VM_LCM_STATE[vm['LCM_STATE']]
@@ -362,7 +362,7 @@ class ONESunstoneClient(object):
             actions.remove('startvnc')
 
         if len(actions) == 0:
-            vmid = vm['TEMPLATE']['VMID']
+            vmid = vm['ID']
             state = VM_STATE[vm['STATE']]
             lcm_state = VM_LCM_STATE[vm['LCM_STATE']]
             if state != u'ACTIVE':
@@ -381,7 +381,7 @@ class ONESunstoneClient(object):
             print '{id} - {name}'.format(id=aid, name=action)
 
         msg = u'Select an action to perform on {id} - {name}, or q|quit to exit'
-        print msg.format(id=vm['TEMPLATE']['VMID'],
+        print msg.format(id=vm['ID'],
                          name=vm['NAME'])
 
         choice = raw_input(u'[startvnc]: ')
@@ -497,7 +497,7 @@ class ONESunstoneClient(object):
         """Start a VNC client for a VM
 
         """
-        vmid = vm['TEMPLATE']['VMID']
+        vmid = vm['ID']
 
         self.logger.info('Start VNC client for {id}'.format(id=vmid))
 
