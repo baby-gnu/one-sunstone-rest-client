@@ -142,7 +142,7 @@ def main():
 
         osc.loop()
 
-    except Exception, err:
+    except Exception as err:
         main_logger.error("{msg}".format(msg=err),
                           exc_info=main_logger.isEnabledFor(logging.DEBUG))
         sys.exit(1)
@@ -311,7 +311,7 @@ class ONESunstoneClient(object):
             try:
                 vm = self.get_vm(self.opts.vm)
                 return vm
-            except SystemError, err:
+            except SystemError as err:
                 print err
 
         vms = self.get_vm()
@@ -527,7 +527,7 @@ class ONESunstoneClient(object):
             self.socket = gevent.socket.socket(AF_UNIX, SOCK_STREAM)
             self.socket.bind(self.socket_path)
             self.socket.listen(1)
-        except gevent.socket.error, err:
+        except gevent.socket.error as err:
             print 'Failed to create socket. Error code: ' + str(err[0]) + ' , Error message : ' + err[1]
             sys.exit(1)
 
@@ -570,7 +570,7 @@ class ONESunstoneClient(object):
             self.logger.debug(msg.format(cmd=' '.join(cmd)))
 
             gevent.subprocess.call(cmd)
-        except Exception, err:
+        except Exception as err:
             print "Fail to run ssvncviewer: {err}".format(err=err)
 
         self.terminate()
@@ -586,7 +586,7 @@ class ONESunstoneClient(object):
             data = self.websocket.recv()
             try:
                 self.connection.sendall(data)
-            except gevent.socket.error, err:
+            except gevent.socket.error as err:
                 print "Unable to write to local socket: {err}".format(err=err)
                 self.terminate()
 
@@ -600,7 +600,7 @@ class ONESunstoneClient(object):
             data = self.connection.recv(4096)
             try:
                 self.websocket.send(data)
-            except gevent.socket.error, err:
+            except gevent.socket.error as err:
                 print "Unable to write to WebSocket: {err}".format(err=err)
                 self.terminate()
 
