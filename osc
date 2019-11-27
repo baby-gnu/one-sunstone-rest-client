@@ -337,7 +337,7 @@ class ONESunstoneClient(object):
                                 lcm_state=lcm_state))
 
         print('Select a virtual machine id or q|quit to exit')
-        choice = raw_input('[q]: ')
+        choice = input('[q]: ')
 
         vm_ids = vm_info.keys()
         if choice == '':
@@ -388,7 +388,7 @@ class ONESunstoneClient(object):
         print(msg.format(id=vm['ID'],
                          name=vm['NAME']))
 
-        choice = raw_input('[startvnc]: ')
+        choice = input('[startvnc]: ')
 
         if choice == '':
             choice = 'startvnc'
