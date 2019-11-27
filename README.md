@@ -40,6 +40,19 @@ The Sunstone URL is retrieve in the following order:
 1. from command line parameter `--url`
 2. from environment variable `ONE_SUNSTONE`
 
+If your OpenNebula NoVNC is behind a reverse proxy, you will need to
+pass options `--ws-port` to specify the port number and `--ws-path` to
+specify the URL path.
+
+By default, `--ws-port` is `29876` and `--ws-path` is `/` but if your
+NoVNC is accessible on port `443` under the directory `/websockify`
+(as [proposed in issue#2781](https://github.com/OpenNebula/one/issues/2781)),
+you must use:
+
+```
+osc --url https://one.example.net --ws-port 443 --ws-path /websockify
+```
+
 # Limitations
 
 Actually it can only run `ssvncviewer` on one virtual macine.

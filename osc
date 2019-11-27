@@ -173,6 +173,10 @@ The Sunstone URL is retrieve in the following order:
 
     parser.add_argument('--url', help='URL to OpenNebula Sunstone frontend')
 
+    parser.add_argument('--ws-port', default='29876', help='Websocket port')
+
+    parser.add_argument('--ws-path', default='/', help='Websocket PATH')
+
     parser.add_argument('--auth', help='ONE_AUTH file')
 
     group = parser.add_argument_group('logging')
@@ -508,8 +512,10 @@ class ONESunstoneClient(object):
         vnc = reply.json()
 
         vnc_host = urlparse(startvnc_url).netloc
-        ws_url = "ws://{host}:29876/?token={token}".format(host=vnc_host,
-                                                           token=vnc['token'])
+        ws_url = "ws://{host}{ws_port}{ws_path}?token={token}".format(host=vnc_host,
+                                                                      ws_port=':{0}'.format(self.opts.ws_port),
+                                                                      ws_path=self.opts.ws_path,
+                                                                      token=vnc['token'])
 
         socket_name = 'one-sunstone-client-' + vnc['token'] + '.socket'
         self.socket_path = join('/tmp', socket_name)
@@ -525,6 +531,7 @@ class ONESunstoneClient(object):
             print 'Failed to create socket. Error code: ' + str(err[0]) + ' , Error message : ' + err[1]
             sys.exit(1)
 
+        self.logger.debug('Create a websocket connection to {ws_url}'.format(ws_url=ws_url))
         self.websocket = create_connection(ws_url,
                                            header=['Origin: {url}'.format(url=self.opts.url),
                                                    'Sec-WebSocket-Protocol: binary'])
