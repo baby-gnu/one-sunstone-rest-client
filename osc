@@ -36,7 +36,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from websocket import create_connection
-from urlparse import urlparse
+from urllib.parse import urlparse
 
 from os import access
 from os import R_OK
