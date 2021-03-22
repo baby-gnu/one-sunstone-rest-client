@@ -398,13 +398,13 @@ class ONESunstoneClient(object):
             else:
                 raise ValueError(f'Invalid response: {choice}')
 
-    def _find_csrftoken(self, text):
+    def _find_csrftoken(self, lines):
         """Find the csrftoken in the text
 
         """
         csrftoken = None
 
-        for line in text.splitlines():
+        for line in lines:
             m = self.csrftoken_regex.search(line)
             if m is not None:
                 csrftoken = m.group(1)
@@ -442,7 +442,7 @@ class ONESunstoneClient(object):
 
         csrftoken = None
         for script in soup.find_all('script'):
-            csrftoken = self._find_csrftoken(script.getText())
+            csrftoken = self._find_csrftoken(script)
             if csrftoken is not None:
                 break
 
